@@ -54,7 +54,7 @@ print("\nTop 3 predictions:")
 for score, idx in zip(top3.values, top3.indices):
     print(f"{classes[idx]}: {score.item():.3f}")
 
-print("\nTrue country (from your data):", row.country)
+print("\nTrue country:", row.country)
 
 grads, acts = [], []
 
