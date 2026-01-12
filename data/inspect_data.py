@@ -119,7 +119,7 @@ def main():
     # session = requests.Session()
     # n_random_images(df, n=8, session=session)
     
-    download_country_images(df, "United Kingdom", "country_images")
+    download_country_images(df, "Bulgaria", "country_images")
 
 
 if __name__ == "__main__":
