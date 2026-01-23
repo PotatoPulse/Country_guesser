@@ -39,7 +39,7 @@ class CountryDataset(Dataset):
 def load_resnet50(num_classes: int) -> nn.Module:
     model = models.resnet50(num_classes=365)
 
-    state = torch.load("resnet50_places365.pth", map_location="cpu", weights_only=True)
+    state = torch.load("saved_models/resnet50_places365.pth", map_location="cpu", weights_only=True)
     model.load_state_dict(state)
 
     model.fc = nn.Linear(model.fc.in_features, num_classes)
@@ -50,7 +50,7 @@ def accuracy(logits: torch.Tensor, y: torch.Tensor) -> float:
     return (logits.argmax(dim=1) == y).float().mean().item()
 
 def train():
-    df = pd.read_parquet("split_data.parquet")
+    df = pd.read_parquet("../data/datasets/split_data.parquet")
     
     required_columns = {"img_url", "country", "split"}
     missing_columns = required_columns - set(df.columns)

@@ -12,13 +12,13 @@ import cv2
 
 model = models.resnet50(num_classes=365)
 
-model.load_state_dict(torch.load("resnet50_places365.pth",
+model.load_state_dict(torch.load("saved_models/resnet50_places365.pth",
                                  map_location="cpu", weights_only=True))
 model.eval()
 
 print("Model loaded")
 
-df = pd.read_parquet("split_data.parquet")
+df = pd.read_parquet("../data/datasets/split_data.parquet")
 test_df = df[df.split == "test"]
 row = test_df.sample(1).iloc[0]
 response = requests.get(row.img_url)
