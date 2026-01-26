@@ -3,6 +3,7 @@ from tqdm import tqdm
 import requests
 # import re
 import time
+import json
 
 ACCESS_TOKEN = "MLY|25484984784501735|4633da3c1fba24964c4a1ce031b9e238"
 
@@ -30,7 +31,7 @@ def chunks(lst, n):
         yield lst[i:i + n]
 
 
-def obtain_image_urls(df, country, batch_size=300):
+def obtain_image_urls(df, country, batch_size=1000):
     # add image url to datapoints
     df = df.copy()
 
@@ -99,6 +100,11 @@ def n_per_country(df, n, test_size, val_size, seed):
 def main():
     raw_data = "datasets/raw_data.parquet"
     df = pd.read_parquet(raw_data, engine="fastparquet")
+    
+    with open("bad_images.json", "r") as f:
+        bad_images = set(json.load(f))
+        
+    df = df[~df["image_id"].astype(str).isin(bad_images)]
 
     seed = 42
 
@@ -107,7 +113,7 @@ def main():
 
     split_data = n_per_country(
         df,
-        n=300,
+        n=1000,
         test_size=test_size,
         val_size=val_size,
         seed=seed,

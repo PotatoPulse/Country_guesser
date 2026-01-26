@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import models, transforms
 from tqdm import tqdm
+from data.preprocessing.preprocessing import preprocess, input_transform
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
@@ -92,18 +93,25 @@ def make_optimizer(model, lrs):
 def load_resnet50(num_classes: int) -> nn.Module:
     model = models.resnet50(num_classes=365)
 
-    state = torch.load("saved_models/resnet50_places365.pth", map_location="cpu", weights_only=True)
+    state = torch.load("model/saved_models/resnet50_places365.pth", map_location="cpu", weights_only=True)
     model.load_state_dict(state)
 
     model.fc = nn.Linear(model.fc.in_features, num_classes)
 
     return model
 
+def topk_accuracy(logits: torch.Tensor, y: torch.Tensor, k: int) -> float:
+    with torch.no_grad():
+        topk = logits.topk(k, dim=1).indices
+        correct = topk.eq(y.unsqueeze(1))
+        return correct.any(dim=1).float().mean().item()
+
+
 def accuracy(logits: torch.Tensor, y: torch.Tensor) -> float:
     return (logits.argmax(dim=1) == y).float().mean().item()
 
 def train():
-    df = pd.read_parquet("../data/datasets/split_data.parquet")
+    df = pd.read_parquet("data/datasets/split_data_1000.parquet")
     
     required_columns = {"img_url", "country", "split"}
     missing_columns = required_columns - set(df.columns)
@@ -120,17 +128,17 @@ def train():
     index_country = {index: country for country, index in country_index.items()}
     num_classes = len(country_list)
 
-    tf = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225]
-        )
-    ])
+    # tf = transforms.Compose([
+    #     transforms.Resize((224, 224)),
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(
+    #         mean=[0.485, 0.456, 0.406],
+    #         std=[0.229, 0.224, 0.225]
+    #     )
+    # ])
     
     train_loader = DataLoader(
-        CountryDataset(train_df, country_index, tf),
+        CountryDataset(train_df, country_index, transform=preprocess),
         batch_size = 64,
         shuffle=True,
         num_workers = 16,
@@ -138,7 +146,7 @@ def train():
     )
 
     val_loader = DataLoader(
-        CountryDataset(val_df, country_index, tf),
+        CountryDataset(val_df, country_index, transform=input_transform),
         batch_size = 64,
         shuffle=False,
         num_workers = 16,
@@ -154,7 +162,9 @@ def train():
         p.requires_grad = True
 
     loss_fn = nn.CrossEntropyLoss()
-    best_validation = 0.0
+    best_validation_top1 = 0.0
+    best_validation_top3 = 0.0
+    best_validation_top5 = 0.0
     scaler = torch.amp.GradScaler("cuda", enabled=(DEVICE.type == "cuda"))
     global_epoch = 0
     
@@ -196,7 +206,9 @@ def train():
 
             model.eval()
             validation_loss = 0.0
-            validation_acc = 0.0
+            validation_top1 = 0.0
+            validation_top3 = 0.0
+            validation_top5 = 0.0
             validation_n = 0
             with torch.no_grad():
                 for x, y in tqdm(val_loader, desc =f"Epoch {global_epoch} [{phase['name']}] {epoch}/{phase['epochs']} [validation]"):
@@ -208,25 +220,34 @@ def train():
 
                     current_batch = x.size(0)
                     validation_loss += loss.item() * current_batch
-                    validation_acc += accuracy(raw_logits, y) * current_batch
+                    validation_top1 += topk_accuracy(raw_logits, y, k=1) * current_batch
+                    validation_top3 += topk_accuracy(raw_logits, y, k=3) * current_batch
+                    validation_top5 += topk_accuracy(raw_logits, y, k=5) * current_batch
                     validation_n += current_batch
 
                 validation_loss /= validation_n
-                validation_acc /= validation_n
+                validation_top1 /= validation_n
+                validation_top3 /= validation_n
+                validation_top5 /= validation_n
 
                 tqdm.write(f"Epoch {global_epoch} [{phase['name']}] {epoch}/{phase['epochs']} | "
                     f"Train loss {train_loss:.4f} accuracy {train_acc:.4f} | "
-                    f"Validation loss {validation_loss:.4f} accuracy {validation_acc:.4f}")
+                    f"Validation loss: {validation_loss:.4f} "
+                    f"| Top-1: {validation_top1:.4f} "
+                    f"| Top-3: {validation_top3:.4f} "
+                    f"| Top-5: {validation_top5:.4f}")
 
-            if validation_acc > best_validation:
-                best_validation = validation_acc
+            if validation_top3 > best_validation_top3:
+                best_validation_top1 = validation_top1
+                best_validation_top3 = validation_top3
+                best_validation_top5 = validation_top5
                 torch.save({
                     "model_state": model.state_dict(),
                     "country_index": country_index,
                     "index_country": index_country},
-                    "saved_models/resnet50_country_best.pth")
+                    "model/saved_models/resnet50_country_best.pth")
         
-    tqdm.write(f"Best validation acccuracy: {best_validation:.4f}")
+    tqdm.write(f"Best validation acccuracy | top-1: {best_validation_top1:.4f} | top-3: {best_validation_top3:.4f} | top-5: {best_validation_top5:.4f}")
 
 if __name__ == "__main__":
     train()

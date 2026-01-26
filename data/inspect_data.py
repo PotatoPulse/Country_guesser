@@ -6,10 +6,14 @@ import matplotlib.pyplot as plt
 import math
 import os
 import shutil
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from astral import LocationInfo
 from astral.sun import sun
 from datetime import timezone
+from tqdm import tqdm
+import asyncio
+import aiohttp
+from tqdm.asyncio import tqdm_asyncio
 
 
 def random_image(df, seed=None, save_path="random_image.jpg"):
@@ -113,17 +117,118 @@ def download_country_images(df, country, output_dir):
             rows.itertuples(index=False)
         )
 
+async def check_image_fast(session, sem, image_id, url):
+    async with sem:
+        try:
+            async with session.get(url, allow_redirects=True) as r:
+                if r.status >= 400:
+                    return image_id
+
+                # ensure body is readable
+                await r.content.read(1024)
+                return None
+
+        except Exception:
+            return image_id
+
+
+async def find_bad_image_ids(df, max_checks=None, concurrency=50):
+    rows = list(df[["image_id", "img_url"]].itertuples(index=False))
+    if max_checks:
+        rows = rows[:max_checks]
+
+    sem = asyncio.Semaphore(concurrency)
+
+    timeout = aiohttp.ClientTimeout(
+        total=None,
+        connect=10,
+        sock_connect=10,
+        sock_read=10,
+    )
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+        )
+    }
+
+    connector = aiohttp.TCPConnector(
+        limit=concurrency,
+        limit_per_host=10,
+        ttl_dns_cache=300,
+    )
+
+    bad_ids = []
+
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+        headers=headers,
+        connector=connector,
+    ) as session:
+
+        tasks = [
+            asyncio.create_task(
+                check_image_fast(session, sem, row.image_id, row.img_url)
+            )
+            for row in rows
+        ]
+
+        for task in tqdm(
+            asyncio.as_completed(tasks),
+            total=len(tasks),
+            desc="Checking images",
+        ):
+            result = await task
+            if result is not None:
+                bad_ids.append(result)
+
+    return bad_ids
+
+def delete_image_id(parquet_path, image_id, output_path=None):
+    if output_path is None:
+        output_path = parquet_path
+
+    df = pd.read_parquet(parquet_path, engine="fastparquet")
+
+    before = len(df)
+    df = df[df["image_id"] != image_id]
+    after = len(df)
+
+    if before == after:
+        print(f"image_id {image_id} not found")
+    else:
+        print(f"removed image_id {image_id}")
+        print(f"rows before: {before}")
+        print(f"rows after : {after}")
+
+    df.to_parquet(output_path, engine="fastparquet", index=False)
+    print(f"saved to {output_path}")
+
+    return df
 
 def main():
-    split_data = "datasets/split_data.parquet"
-    df = pd.read_parquet(split_data, engine="fastparquet")
+    # split_data = "datasets/split_data.parquet"
+    # df = pd.read_parquet(split_data, engine="fastparquet")
 
     # random_image(df)
 
-    session = requests.Session()
-    n_random_images(df, n=8, session=session)
+    # session = requests.Session()
+    # n_random_images(df, n=8, session=session)
 
-    download_country_images(df, "Croatia", "country_images")
+    # download_country_images(df, "Croatia", "country_images")
+    
+    # bad_image_ids = asyncio.run(find_bad_image_ids(df))
+    
+    # print(bad_image_ids)
+    # print(len(bad_image_ids))
+
+    delete_image_id(
+        parquet_path="datasets/split_data.parquet",
+        image_id=759983608038195,
+        output_path="datasets/split_data.parquet",
+    )
 
 
 if __name__ == "__main__":
