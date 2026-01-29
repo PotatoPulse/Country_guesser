@@ -15,6 +15,7 @@ import csv
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
 EPOCHS = 5
+BATCH_SIZE = 64
 
 PHASES = [
     {
@@ -111,7 +112,7 @@ def topk_accuracy(logits: torch.Tensor, y: torch.Tensor, k: int) -> float:
 def accuracy(logits: torch.Tensor, y: torch.Tensor) -> float:
     return (logits.argmax(dim=1) == y).float().mean().item()
 
-def train():
+def train(experiment_name):
     df = pd.read_parquet("data/datasets/split_data_1000.parquet")
     
     required_columns = {"img_url", "country", "split"}
@@ -140,7 +141,7 @@ def train():
     
     train_loader = DataLoader(
         CountryDataset(train_df, country_index, transform=preprocess),
-        batch_size = 64,
+        batch_size = BATCH_SIZE,
         shuffle=True,
         num_workers = 16,
         pin_memory=True
@@ -148,7 +149,7 @@ def train():
 
     val_loader = DataLoader(
         CountryDataset(val_df, country_index, transform=input_transform),
-        batch_size = 64,
+        batch_size = BATCH_SIZE,
         shuffle=False,
         num_workers = 16,
         pin_memory=True
@@ -169,7 +170,7 @@ def train():
     scaler = torch.amp.GradScaler("cuda", enabled=(DEVICE.type == "cuda"))
     global_epoch = 0
     
-    with open("model/logs/training_metrics.csv", "w", newline="") as f:
+    with open(f"model/logs/training_metrics_{experiment_name}.csv", "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
             "epoch", "phase",
@@ -254,7 +255,7 @@ def train():
                         "model_state": model.state_dict(),
                         "country_index": country_index,
                         "index_country": index_country},
-                        "model/saved_models/resnet50_country_best.pth")
+                        f"model/saved_models/resnet50_country_best_{experiment_name}.pth")
                     
                 writer.writerow([
                     global_epoch, phase["name"],
@@ -268,10 +269,11 @@ def train():
     tqdm.write(f"Best validation acccuracy | top-1: {best_validation_top1:.4f} | top-3: {best_validation_top3:.4f} | top-5: {best_validation_top5:.4f}")
 
 if __name__ == "__main__":
+    experiment_name = "without_augmentation"
     train()
     
     # test
-    ckpt = torch.load("model/saved_models/resnet50_country_best.pth")
+    ckpt = torch.load(f"model/saved_models/resnet50_country_best_{experiment_name}.pth")
     country_index = ckpt["country_index"]
     num_classes = len(country_index)
 
@@ -286,7 +288,7 @@ if __name__ == "__main__":
     
     test_loader = DataLoader(
         CountryDataset(test_df, country_index, transform=input_transform),
-        batch_size=64,
+        batch_size=BATCH_SIZE,
         shuffle=False,
         num_workers=16,
     )
