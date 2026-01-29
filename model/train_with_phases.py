@@ -269,8 +269,8 @@ def train(experiment_name):
     tqdm.write(f"Best validation acccuracy | top-1: {best_validation_top1:.4f} | top-3: {best_validation_top3:.4f} | top-5: {best_validation_top5:.4f}")
 
 if __name__ == "__main__":
-    experiment_name = "without_augmentation"
-    train()
+    experiment_name = "crop"
+    train(experiment_name)
     
     # test
     ckpt = torch.load(f"model/saved_models/resnet50_country_best_{experiment_name}.pth")

@@ -22,16 +22,8 @@ class Augmentor:
             saturation=0.1,
             hue=0.02,
         )
-        self.crop = T.RandomResizedCrop(
-            224,
-            scale=(0.85, 1.0),
-            ratio=(0.9, 1.1)
-        )
 
     def __call__(self, image):
-        if torch.rand(1) < self.chances.get("crop", 0.0):
-            image = self.crop(image)
-
         if torch.rand(1) < self.chances.get("rotation", 0.0):
             image = self.rotate(image)
 
@@ -44,10 +36,9 @@ class Augmentor:
         return image
 
 chances = { 
-    "crop": 0.15, 
-    "rotation": 0.25, 
+    "rotation": 0.3, 
     "blur": 0.3, 
-    "colour_jitter": 0.35, 
+    "colour_jitter": 0.3, 
 }
 
 augment = Augmentor(chances)
