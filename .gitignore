@@ -3,3 +3,4 @@
 model/saved_models
 *.csv
 *.pyc
+*.png
