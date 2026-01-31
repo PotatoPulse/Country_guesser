@@ -220,6 +220,7 @@ def main():
     
     distribution = image_distribution(df[df["split"] == "test"])
     print(distribution)
+    print(len(df))
 
     # random_image(df)
 

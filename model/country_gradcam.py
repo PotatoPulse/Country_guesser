@@ -11,11 +11,13 @@ import cv2
 import os
 import shutil
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 if os.path.exists("outputs"):
     shutil.rmtree("outputs")
 os.makedirs("outputs", exist_ok=True)
 
-state = torch.load("model/resnet50_country_best.pth", map_location="cpu")
+state = torch.load("saved_models/resnet50_country_best_1000.pth", map_location=DEVICE)
 
 num_classes = len(state["index_country"])
 
@@ -23,27 +25,27 @@ model = models.resnet50(num_classes=num_classes)
 model.fc = nn.Linear(model.fc.in_features, num_classes)
 
 model.load_state_dict(state["model_state"])
-
-state = torch.load("model/resnet50_country_best.pth", map_location="cpu")
-model.load_state_dict(state["model_state"])
+model = model.to(DEVICE)
 model.eval()
 
 classes = [state["index_country"][i] for i in range(num_classes)]
 
 print("Model loaded with", num_classes, "countries.")
 
-df = pd.read_parquet("data/datasets/split_data_1000.parquet")
-test_df = df[df.split == "test"]
-row = test_df.sample(1).iloc[0]
+# df = pd.read_parquet("data/datasets/split_data_1000.parquet")
+# test_df = df[df.split == "test"]
+# row = test_df.sample(1).iloc[0]
 
-response = requests.get(row.img_url)
-img = Image.open(BytesIO(response.content)).convert("RGB")
+# response = requests.get(row.img_url)
+# img = Image.open(BytesIO(response.content)).convert("RGB")
 
-print(f"Random TEST image: {row.image_id} | Country: {row.country}")
-print("Image format:", img.size)
+# print(f"Random TEST image: {row.image_id} | Country: {row.country}")
+# print("Image format:", img.size)
 
-img.save("outputs/random_test_image.jpg")
-print("Saved original image to outputs/random_test_image.jpg")
+# img.save("outputs/random_test_image.jpg")
+# print("Saved original image to outputs/random_test_image.jpg")
+
+img = Image.open("../plots/fail_Italy.jpg").convert("RGB")
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -53,19 +55,25 @@ transform = transforms.Compose([
         std=[0.229, 0.224, 0.225]
     )
 ])
-img_t = transform(img).unsqueeze(0)
+img_t = transform(img).unsqueeze(0).to(DEVICE)
 print("Transformed image shape:", img_t.shape)
 
 with torch.no_grad():
     outputs = model(img_t)
     probs = torch.softmax(outputs, dim=1)[0]
     top3 = torch.topk(probs, 3)
+    
+sorted_probs, sorted_idx = torch.sort(probs, descending=True)
 
-print("\nTop 3 predictions:")
-for score, idx in zip(top3.values, top3.indices):
-    print(f"{classes[idx]}: {score.item():.3f}")
+print("\nFull prediction list:")
+for idx, score in zip(sorted_idx, sorted_probs):
+    print(f"{classes[idx]}: {score.item():.6f}")
 
-print("\nTrue country:", row.country)
+# print("\nTop 3 predictions:")
+# for score, idx in zip(top3.values, top3.indices):
+#     print(f"{classes[idx]}: {score.item():.3f}")
+
+# print("\nTrue country:", row.country)
 
 grads, acts = [], []
 
@@ -75,10 +83,7 @@ def forward_hook(module, input, output):
 def backward_hook(module, grad_in, grad_out):
     grads.append(grad_out[0])
 
-target_layer = model.layer4[2].conv3
-target_layer.register_forward_hook(forward_hook)
-target_layer.register_full_backward_hook(backward_hook)
-
+target_layer = model.layer4[-1].conv3
 
 top_classes = top3.indices[:3]
 
@@ -99,7 +104,7 @@ for i, class_idx in enumerate(top_classes):
     cam_resized = F.interpolate(cam.unsqueeze(0).unsqueeze(0),
                                 size=(img.height, img.width),
                                 mode='bilinear', align_corners=False)
-    cam_resized = cam_resized.squeeze().numpy()
+    cam_resized = cam_resized.squeeze().cpu().numpy()
 
     heatmap = (cam_resized * 255).astype(np.uint8)
     heatmap_color = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
@@ -116,5 +121,3 @@ for i, class_idx in enumerate(top_classes):
 
     f_handle.remove()
     b_handle.remove()
-
-print("\nOutputs are in the 'outputs' folder.")
